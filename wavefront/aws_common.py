@@ -5,26 +5,23 @@ and the AWS Billing script commands.
 
 import datetime
 import json
-import logging
-import numbers
 import os
 import os.path
 
 import boto3
 
 from wavefront.metrics_writer import WavefrontMetricsWriter
-from wavefront.utils import Configuration
 from wavefront import command
 
 # default configuration
-DEFAULT_CONFIG_FILE = '/opt/wavefront/etc/aws-metrics.conf'
+
 
 # The directory where we should look for and store the cache
 # files of instances and their tags.
 CACHE_DIR = '/tmp'
 
 #pylint: disable=too-many-instance-attributes
-class AwsBaseMetricsConfiguration(Configuration):
+class AwsBaseMetricsConfiguration(command.CommandConfiguration):
     """
     Common Configuration file for this command
     """
@@ -42,6 +39,8 @@ class AwsBaseMetricsConfiguration(Configuration):
         self.regions = self.getlist('aws', 'regions', None, None, ',', True)
         self.sub_accounts = self.getlist('aws', 'sub_accounts', [])
 
+        self._setup_output(self)
+
 class AwsBaseMetricsCommand(command.Command):
     """
     Abstract base class for both AWS cloudwatch metrics and AWS billing metrics
@@ -50,6 +49,7 @@ class AwsBaseMetricsCommand(command.Command):
 
     def __init__(self, **kwargs):
         super(AwsBaseMetricsCommand, self).__init__(**kwargs)
+
         self.account = None
         self.config = None
         self.proxy = None
@@ -64,19 +64,12 @@ class AwsBaseMetricsCommand(command.Command):
                                             self.config.is_dry_run)
         self.proxy.start()
 
-    def _init_logging(self):
-        self.logger = logging.getLogger()
-
-    def add_arguments(self, parser):
+    def _process(self):
         """
-        Adds arguments supported by this command to the argparse parser
-        :param parser: the argparse parser created using .add_parser()
+        Process this aws command (implemented by derived class)
         """
 
-        parser.add_argument('--config',
-                            dest='config_file_path',
-                            default=DEFAULT_CONFIG_FILE,
-                            help='Path to configuration file')
+        pass
 
     def _execute(self):
         """
@@ -85,6 +78,7 @@ class AwsBaseMetricsCommand(command.Command):
 
         self._init_proxy()
         self.account = AwsAccount(self.config, True)
+        self._process()
 
     @staticmethod
     def get_source(source_names, point_tags, dimensions=None):
@@ -100,12 +94,6 @@ class AwsBaseMetricsCommand(command.Command):
         """
 
         for name in source_names:
-            if dimensions and isinstance(name, numbers.Number):
-                if len(dimensions) < int(name):
-                    return (dimensions[name], name)
-                else:
-                    continue
-
             if name[0:1] == '=':
                 return (name[1:], None)
 
@@ -153,7 +141,8 @@ class AwsAccount(object):
             arn = role_arn
 
         else:
-            iam_client = self.get_session('us-east-1', None, None).client('iam')
+            iam_client = self.get_session(
+                self.regions[0], None, None).client('iam')
             arn = iam_client.get_user()['User']['Arn']
 
         return arn.split(':')[4]
@@ -167,6 +156,9 @@ class AwsAccount(object):
         """
 
         if role_arn:
+            if not external_id:
+                raise ValueError('External ID is required for region ' +
+                                 region + ' and role ARN ' + role_arn)
             cache_key = ':'.join([region, role_arn, external_id])
         else:
             cache_key = region
@@ -191,7 +183,7 @@ class AwsAccount(object):
                     region_name=region)
 
             else:
-                self.sessions[cache_key] = boto3.Session(
+                self.sessions[cache_key] = boto3.session.Session(
                     region_name=region,
                     aws_access_key_id=access_key_id,
                     aws_secret_access_key=secret_access_key)
@@ -211,9 +203,6 @@ class AwsSubAccountConfiguration(object):
         self.enabled = self.config.getboolean(section_name, 'enabled', False)
         self.role_arn = self.config.get(section_name, 'role_arn', None)
         self.role_external_id = self.config.get(section_name, 'external_id', None)
-        self.access_key_id = self.config.get(section_name, 'access_key_id', None)
-        self.secret_access_key = self.config.get(
-            section_name, 'secret_access_key', None)
 
 class AwsSubAccount(object):
     """

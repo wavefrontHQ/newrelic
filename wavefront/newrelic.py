@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 """
-This script is intended to be run either manually from the command line or
-via cron.  It pulls metrics from New Relic.  See the README for
+This script pulls metrics from New Relic.  See the README for
 more details on configuration.
 """
 
@@ -27,7 +26,7 @@ from wavefront.newrelic_common import NewRelicCommand
 DEFAULT_MAX_METRIC_NAME_COUNT = 25
 
 # default location for the configuration file.
-DEFAULT_CONFIG_FILE_PATH = '/opt/wavefront/etc/newrelic.conf'
+DEFAULT_CONFIG_FILE_PATH = '/opt/wavefront/etc/wavefront-collector-newrelic.conf'
 
 #pylint: disable=too-many-instance-attributes
 class NewRelicPluginConfiguration(Configuration):
@@ -76,6 +75,12 @@ class NewRelicPluginConfiguration(Configuration):
             'options', 'include_server_summary', True)
         self.include_servers = self.getboolean(
             'options', 'include_server_details', False)
+        self.output_directory = self.config.get(
+            'options', 'output_directory', '.')
+        self.output = Configuration(
+            config_file_path=self.output_directory,
+            create_if_not_exist=True)
+
         self.include_hosts = self.getboolean('options', 'include_hosts', True)
         self.min_delay = int(self.get('options', 'min_delay', 60))
         self.wf_api_key = self.get('wavefront_api', 'key', '')
@@ -126,8 +131,8 @@ class NewRelicPluginConfiguration(Configuration):
         if not run_time:
             run_time = (datetime.datetime.utcnow()
                         .replace(microsecond=0, tzinfo=dateutil.tz.tzutc()))
-        self.config.set('options', 'last_run_time', run_time.isoformat())
-        self.save()
+        self.output.set('options', 'last_run_time', run_time.isoformat())
+        self.output.save()
 
     def get_value_to_send(self, name, value):
         """
@@ -195,34 +200,21 @@ class NewRelicMetricRetrieverCommand(NewRelicCommand):
 
         return "Pull metrics from New Relic"
 
-    #pylint: disable=no-self-use
-    def add_arguments(self, parser):
-        """
-        Adds arguments for this command to the parser.
-
-        Arguments:
-        parser - the argparse parser created using .add_parser()
-        """
-
-        parser.add_argument('--config',
-                            dest='config_file_path',
-                            default=DEFAULT_CONFIG_FILE_PATH,
-                            help='Path to configuration file')
-
-    def _parse_args(self, arg):
+    def _initialize(self, args):
         """
         Parses the arguments passed into this command.
 
         Arguments:
-        arg - the argparse parser object returned from parser.parse_args()
+        arg - the argparse parser object returned from argparser
         """
 
-        self.config = NewRelicPluginConfiguration(arg.config_file_path)
+        self.config = NewRelicPluginConfiguration(args.config_file_path)
         self.config.validate()
         try:
-            logging.config.fileConfig(arg.config_file_path)
+            logging.config.fileConfig(args.config_file_path)
         except ConfigParser.NoSectionError:
             pass
+        self.logger = logging.getLogger()
 
     def get_metric_names_for_path(self, path, names_filter):
         """

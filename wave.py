@@ -11,10 +11,12 @@ import ConfigParser
 import importlib
 import logging
 import logging.config
-import sys
+#import sys
 import threading
+#import traceback
 
 import argparse
+import boto3
 import daemon
 import daemon.pidfile
 from wavefront import utils
@@ -23,9 +25,9 @@ from wavefront import utils
 # List of available commands to run.  This is currently hard-coded, but later
 # could (and should) be auto-generated from the commands installed.
 INSTALLED_COMMANDS = {
-    'newrelic': (
-        'wavefront.newrelic',
-        'NewRelicMetricRetrieverCommand'
+    'appdynamics': (
+        'wavefront.appdynamics',
+        'AppDMetricRetrieverCommand'
         ),
     'awsbilling': (
         'wavefront.awsbilling',
@@ -34,6 +36,10 @@ INSTALLED_COMMANDS = {
     'awscloudwatch': (
         'wavefront.awscloudwatch',
         'AwsCloudwatchMetricsCommand'
+        ),
+    'newrelic': (
+        'wavefront.newrelic',
+        'NewRelicMetricRetrieverCommand'
         ),
     'systemchecker': (
         'wavefront.system_checker',
@@ -55,10 +61,10 @@ def parse_args():
                         dest='config')
     parser.add_argument('--daemon', action='store_true', default=False,
                         help='Run in background (default is false)')
-    parser.add_argument('--out', default='./wavefront.out',
+    parser.add_argument('--out',
                         help=('The path to the file where stdout/stderr '
                               'should be redirected when running --daemon'))
-    parser.add_argument('--pid', default='./wavefront.pid',
+    parser.add_argument('--pid',
                         help='The path to the PID file when running --daemon')
 
     args, _ = parser.parse_known_args()
@@ -77,11 +83,12 @@ def parse_args():
         try:
             module = importlib.import_module(details[0])
         except:
-            #print('failed loading %s: %s' % (command_name, str(sys.exc_info())))
+#            print('failed loading %s: %s' % (command_name, str(sys.exc_info())))
+#            traceback.print_exc()
             continue
 
         class_name = details[1]
-        command = getattr(module, class_name)()
+        command = getattr(module, class_name)(name=command_name)
         subparser = subparsers.add_parser(command_name,
                                           help=command.get_help_text())
         command.add_arguments(subparser)
@@ -159,6 +166,15 @@ def main():
     """
     Main function
     """
+
+    # this is a hack to workaround a bug in boto3
+    # see this bug report:
+    # https://github.com/boto/botocore/issues/577
+    boto3.setup_default_session()
+    boto3.DEFAULT_SESSION._session.get_component('data_loader')
+    boto3.DEFAULT_SESSION._session.get_component('event_emitter')
+    boto3.DEFAULT_SESSION._session.get_component('endpoint_resolver')
+    boto3.DEFAULT_SESSION._session.get_component('credential_provider')
 
     logging.basicConfig(format='%(levelname)s: %(message)s',
                         level=logging.INFO)
@@ -243,9 +259,10 @@ def get_command_object(command_name):
         details = INSTALLED_COMMANDS[command_name]
         command_module = importlib.import_module(details[0])
         class_name = details[1]
-        return getattr(command_module, class_name)()
+        return getattr(command_module, class_name)(name=command_name)
+
     else:
-        raise ValueError('Command ' + command_name + ' not found')
+        raise ValueError('Command ' + str(command_name) + ' not found')
 
 if __name__ == '__main__':
     main()

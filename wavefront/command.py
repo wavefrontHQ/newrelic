@@ -2,9 +2,13 @@
 Command base class and utility functions
 """
 
+import datetime
 import gc
 import logging
+import os.path
 import time
+
+import dateutil.tz
 
 from wavefront import utils
 
@@ -17,30 +21,24 @@ class Command(object):
 
     def __init__(self, **kwargs):
         super(Command, self).__init__()
+
         self.verbose = False
         self.logger = logging.getLogger()
         if len(self.logger.root.handlers) > 0:
             fmt = logging.Formatter('%(levelname)s: %(thread)d %(message)s')
             self.logger.root.handlers[0].setFormatter(fmt)
         self.description = kwargs.get('description', 'Wavefront command')
+        self.name = kwargs.get('name', 'wfcollector')
 
-    def _init_logging(self):
+    def _initialize(self, args):
         """
-        Initialize the logger.  Overwrite this to set the log to run from
-        a separate configuration, etc.
-        """
-
-        pass
-
-    def _parse_args(self, args):
-        """
-        Parses the command specific arguments out.
+        Initializes the command
 
         Arguments:
         args - list of arguments
         """
 
-        raise ValueError('command:parse_args() should be implemented '
+        raise ValueError('command:_initiailize() should be implemented '
                          'by subclass')
 
     def add_arguments(self, parser):
@@ -51,8 +49,11 @@ class Command(object):
         parser - the subparser where arguments are added
         """
 
-        raise ValueError('command:parse_args() should be implemented '
-                         'by subclass')
+        default_config = '/opt/wavefront/etc/' + self.name + '.conf'
+        parser.add_argument('--config',
+                            dest='config_file_path',
+                            default=default_config,
+                            help='Path to configuration file')
 
     #pylint: disable=bare-except
     def execute(self, args):
@@ -60,11 +61,10 @@ class Command(object):
         Execute this command with the given arguments.
 
         Arguments:
-        arg - the argparse parser object returned from parser.parse_args()
+        arg - the argparse parser object returned from argparser
         """
 
-        self._parse_args(args)
-        self._init_logging()
+        self._initialize(args)
         while not utils.CANCEL_WORKERS_EVENT.is_set():
             try:
                 self.logger.info('Executing %s ...', self.description)
@@ -97,13 +97,68 @@ class Command(object):
 
         return ""
 
-    def output_verbose(self, msg):
+# pylint: disable=too-few-public-methods
+class CommandConfiguration(utils.Configuration):
+    """
+    Base class for configurations of a command
+    """
+
+    def __init__(self, config_file_path, create_if_not_exist=False):
+        super(CommandConfiguration, self).__init__(
+            config_file_path=config_file_path,
+            create_if_not_exist=create_if_not_exist)
+
+        self.output_directory = None
+        self.output = None
+
+    def _setup_output(self, config):
         """
-        Very simple function to output to stdout if verbose flag is set.
+        Sets up the output directory and output file
+        """
+
+        self.output_directory = config.get('options', 'output_directory', None)
+
+        if self.output_directory:
+            if not os.path.exists(self.output_directory):
+                os.makedirs(self.output_directory)
+
+            output_file = (self.output_directory + '/' +
+                           os.path.basename(self.config_file_path) + '.save')
+        else:
+            output_file = self.config_file_path + '.save'
+
+        # try to touch the file to see if we have permission
+        try:
+            with open(output_file, 'a'):
+                os.utime(output_file, None)
+        except IOError:
+            print "Unable to write to output file " + output_file
+            output_file = ('/tmp/' + os.path.basename(self.config_file_path) +
+                           '.save')
+
+        self.output = utils.Configuration(
+            config_file_path=output_file,
+            create_if_not_exist=True)
+
+    def get_last_run_time(self):
+        """
+        Gets the last run time as a string
+        """
+        return self.output.get('options', 'last_run_time', None)
+
+    def set_last_run_time(self, run_time):
+        """
+        Sets the last run time to the run_time argument.
 
         Arguments:
-        msg - the message to output
+        run_time - the time when this script last executed successfully (end)
         """
 
-        if self.verbose:
-            print msg
+        if utils.CANCEL_WORKERS_EVENT.is_set():
+            return
+
+        if not run_time:
+            run_time = (datetime.datetime.utcnow()
+                        .replace(microsecond=0, tzinfo=dateutil.tz.tzutc()))
+        self.output.set('options', 'last_run_time', run_time.isoformat())
+        self.output.save()

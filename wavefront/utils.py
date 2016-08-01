@@ -236,6 +236,7 @@ def sanitize_name(_name, replace_map=None):
         replace_map = [
             {'*': 'all'},
             {'.': '_'},
+            {'|': '.'},
             {'//': '.'},
             {'/': '.'}
         ]
@@ -445,6 +446,12 @@ class CsvFileRow(object):
         """
         self.csvfile = csvfile
         self.row = row
+
+    def __str__(self):
+        return str(self.row)
+
+    def __repr__(self):
+        return repr(self.row)
 
     def __getitem__(self, name):
         if name not in self.csvfile.header_key_to_index:

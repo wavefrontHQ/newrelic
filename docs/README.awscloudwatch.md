@@ -59,7 +59,7 @@ Each sub-account listed in the `sub_accounts` list should have a corresponding s
 | Option | Description | Required? | Default |
 | ------ | ----------- | ------- | ------- |
 | enabled | Is this sub account enabled? | No | False |
-| role_arn | THe AWS Role ARN to assume | No | |
+| role_arn | The AWS Role ARN to assume | No | |
 | external_id | The AWS external ID to use when assuming the above role | No | |
 | access_key_id | The AWS access key to use when connecting to this sub account | Yes | None |
 | secret_access_key | The AWS secret access | Yes | None |
@@ -72,21 +72,22 @@ This configuration file should contain a JSON dictionary stored at the top level
 The default configuration is provided [here](https://github.com/wavefront-mike/wavefront-collector/tree/master/data/awscloudwatch-sample-configuration/aws.json.conf).
 
 Each key in the "metrics" object is a regular expression and the value is an object with the following keys:
-    * stats
+   * stats
         a list of statistics to pull down with the GetMetricStatistics() call.  Valid values are any of : 'Average', 'Maximum', 'Minimum', "SampleCount', 'Sum'
-    * source_names
-        an array of :
-          - Point tag name
-          - Dimension name
-          - String literal (must begin with an '=')
-        The first name that contains a value is returned as the source name.
-    * dimensions_as_tags
-        Comma-separated list of dimension names to copy over as point tags
-    * namespace
-        The AWS namespace (AWS/EC2, etc.)
-    * priority
-        A numeric value indicating the priority of this configuration.  This is only used if more than one configuration matches the metric name.
- The key to the dictionary is a regular expression that should match a:
+   * source_name (array)
+     * The first name that contains a value is returned as the source name.
+       * Point tag name
+       * Dimension name
+       * String literal (must begin with an '=').
+   * dimensions_as_tags (array)
+     * Comma-separated list of dimension names to copy over as point tags.  If not provided, all dimensions are pulled as point tags.  To not copy any dimensions as point tags, the value of this must be an empty array ([]).
+   * namespace
+     * This is the AWS namespace (AWS/EC2, etc.).  See [AWS Namespaces](http://docs.aws.amazon.com/AmazonCloudWatch/latest/DeveloperGuide/aws-namespaces.html)
+   * priority
+     * A numeric value indicating the priority of this configuration.  This is only used if more than one configuration matches the metric name.
+
+
+The key to the dictionary is a regular expression that should match a:
      `<namespace>.<metric_name>` (lower case with period escaped with a backslash)
 
 An example of this configuration file is:
