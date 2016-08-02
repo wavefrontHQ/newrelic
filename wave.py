@@ -129,6 +129,7 @@ class WavefrontThreadConfiguration(object):
         self.args.verbose = self.verbose
         self.delay = int(config.get(config_group, 'delay', 0))
         self.args.delay = self.delay
+        self.enabled = config.getboolean(config_group, 'enabled', True)
 
 class WavefrontConfiguration(utils.Configuration):
     """
@@ -170,12 +171,6 @@ def main():
     # this is a hack to workaround a bug in boto3
     # see this bug report:
     # https://github.com/boto/botocore/issues/577
-    boto3.setup_default_session()
-    boto3.DEFAULT_SESSION._session.get_component('data_loader')
-    boto3.DEFAULT_SESSION._session.get_component('event_emitter')
-    boto3.DEFAULT_SESSION._session.get_component('endpoint_resolver')
-    boto3.DEFAULT_SESSION._session.get_component('credential_provider')
-
     logging.basicConfig(format='%(levelname)s: %(message)s',
                         level=logging.INFO)
     args = parse_args()
@@ -209,6 +204,9 @@ def execute_commands(args):
 
         threads = []
         for conf in args.thread_configs:
+            if not conf.enabled:
+                logger.info('Skipping disabled command \'%s\'', conf.command)
+                continue
             targs = (conf.command, conf.args,)
             thread = threading.Thread(target=execute_command, args=targs,
                                       name=conf.command)
