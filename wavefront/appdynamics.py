@@ -52,9 +52,11 @@ class AppDPluginConfiguration(command.CommandConfiguration):
         for regex in self.fields_blacklist_regex:
             self.fields_blacklist_regex_compiled.append(re.compile(regex))
 
+        self.recurse_metric_tree = self.getboolean(
+            'options', 'recurse_metric_tree', False)
         self.application_ids = self.getlist('filter', 'application_ids', [])
-        self.start_time = self.get('filter', 'start_time', None)
-        self.end_time = self.get('filter', 'end_time', None)
+        self.start_time = self.getdate('filter', 'start_time', None)
+        self.end_time = self.getdate('filter', 'end_time', None)
 
         self.namespace = self.get('options', 'namespace', 'appd')
         self.min_delay = int(self.get('options', 'min_delay', 60))
@@ -209,15 +211,13 @@ class AppDMetricRetrieverCommand(command.Command):
 
         # construct start time for when to get metrics starting from
         if self.config.start_time:
-            start = (dateutil.parser.parse(self.config.start_time)
-                     .replace(microsecond=0, tzinfo=dateutil.tz.tzutc()))
+            start = self.config.start_time
         else:
             start = ((datetime.datetime.utcnow() -
                       datetime.timedelta(seconds=60.0))
                      .replace(microsecond=0, tzinfo=dateutil.tz.tzutc()))
         if self.config.end_time:
-            end = (dateutil.parser.parse(self.config.end_time)
-                   .replace(microsecond=0, tzinfo=dateutil.tz.tzutc()))
+            end = self.config.end_time
         else:
             end = None
 
@@ -244,7 +244,10 @@ class AppDMetricRetrieverCommand(command.Command):
             # get a list of metrics available
             # TODO: cache this like New Relic plugin
             self.logger.info('[%s] Getting metric tree', app.name)
-            paths = self.get_metric_paths(app)
+            paths = self.get_metric_paths(app, self.config.recurse_metric_tree)
+            if not paths:
+                self.logger.warn('[%s] no metrics found', app.name)
+                return
 
             # if the time is more than 10 minutes, AppD will make sample size
             # larger than a minute.  so, we'll grab the data in chunks
@@ -272,7 +275,7 @@ class AppDMetricRetrieverCommand(command.Command):
                         not utils.CANCEL_WORKERS_EVENT.is_set()):
                     time.sleep(30)
 
-    def get_metric_paths(self, app):
+    def get_metric_paths(self, app, recurse):
         """
         Calls the get_metric_tree() api for the given app and returns
         all paths that are not in the black list (or are in black but included
@@ -282,7 +285,8 @@ class AppDMetricRetrieverCommand(command.Command):
         See:
         _get_metric_paths()
         """
-        metric_tree = self.appd_client.get_metric_tree(app.id, None, True)
+
+        metric_tree = self.appd_client.get_metric_tree(app.id, None, recurse)
         paths = []
         self._get_metric_paths(paths, app, metric_tree)
         return paths
@@ -300,10 +304,9 @@ class AppDMetricRetrieverCommand(command.Command):
             if utils.CANCEL_WORKERS_EVENT.is_set():
                 break
 
-            if node.type == 'folder':
+            if node.type == 'folder' and node._children:
                 self._get_metric_paths(_rtn_paths, app, node._children)
                 continue
-
 
             # black list ...
             keep = True
@@ -316,7 +319,10 @@ class AppDMetricRetrieverCommand(command.Command):
                     keep = pattern.match(node.path)
 
             if keep:
-                _rtn_paths.append(node.path)
+                if node.type == 'folder':
+                    _rtn_paths.append(node.path + '|*')
+                else:
+                    _rtn_paths.append(node.path)
 
     def _process_metrics(self, paths, app, start, end):
         """

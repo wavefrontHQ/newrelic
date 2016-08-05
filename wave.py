@@ -11,12 +11,11 @@ import ConfigParser
 import importlib
 import logging
 import logging.config
-#import sys
+import sys
 import threading
-#import traceback
+import traceback
 
 import argparse
-import boto3
 import daemon
 import daemon.pidfile
 from wavefront import utils
@@ -66,6 +65,8 @@ def parse_args():
                               'should be redirected when running --daemon'))
     parser.add_argument('--pid',
                         help='The path to the PID file when running --daemon')
+    parser.add_argument('--verbose', action='store_true', default=False,
+                        help='More output')
 
     args, _ = parser.parse_known_args()
     if args.config:
@@ -83,8 +84,10 @@ def parse_args():
         try:
             module = importlib.import_module(details[0])
         except:
-#            print('failed loading %s: %s' % (command_name, str(sys.exc_info())))
-#            traceback.print_exc()
+            if args.verbose:
+                print('failed loading %s: %s' %
+                      (command_name, str(sys.exc_info())))
+                traceback.print_exc()
             continue
 
         class_name = details[1]
@@ -95,8 +98,6 @@ def parse_args():
 
     parser.add_argument('--verbose', action='store_true', default=False,
                         help='More output')
-    parser.add_argument('--debug', action='store_true', default=False,
-                        help=argparse.SUPPRESS)
     parser.add_argument('--daemon', action='store_true', default=False,
                         help='Run in background (default is false)')
     parser.add_argument('--out', default='./wavefront.out',
@@ -129,6 +130,7 @@ class WavefrontThreadConfiguration(object):
         self.args.verbose = self.verbose
         self.delay = int(config.get(config_group, 'delay', 0))
         self.args.delay = self.delay
+        self.enabled = config.getboolean(config_group, 'enabled', True)
 
 class WavefrontConfiguration(utils.Configuration):
     """
@@ -167,15 +169,6 @@ def main():
     Main function
     """
 
-    # this is a hack to workaround a bug in boto3
-    # see this bug report:
-    # https://github.com/boto/botocore/issues/577
-    boto3.setup_default_session()
-    boto3.DEFAULT_SESSION._session.get_component('data_loader')
-    boto3.DEFAULT_SESSION._session.get_component('event_emitter')
-    boto3.DEFAULT_SESSION._session.get_component('endpoint_resolver')
-    boto3.DEFAULT_SESSION._session.get_component('credential_provider')
-
     logging.basicConfig(format='%(levelname)s: %(message)s',
                         level=logging.INFO)
     args = parse_args()
@@ -209,6 +202,9 @@ def execute_commands(args):
 
         threads = []
         for conf in args.thread_configs:
+            if not conf.enabled:
+                logger.info('Skipping disabled command \'%s\'', conf.command)
+                continue
             targs = (conf.command, conf.args,)
             thread = threading.Thread(target=execute_command, args=targs,
                                       name=conf.command)

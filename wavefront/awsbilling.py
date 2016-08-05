@@ -70,6 +70,7 @@ class AwsBillingDetailThreadConfiguration(object):
 
         self.config = config
         self.section_name = section_name
+        self.last_run_time_section = section_name
         self.tmp_dir = self.config.get(section_name, 'tmp_dir', '/tmp/')
         self.namespace = self.config.get(section_name, 'namespace', None)
         self.enabled = self.config.getboolean(section_name, 'enabled', False)
@@ -89,8 +90,6 @@ class AwsBillingDetailThreadConfiguration(object):
         self.instance_id_columns = self.config.getlist(
             section_name, 'instance_id_column_names', [])
         self.delay = int(self.config.get(section_name, 'delay', 3600))
-        self.last_run_time = self.config.output.getdate(
-            section_name, 'last_run_time', None)
         self.record_id_column = self.config.get(
             section_name, 'record_id_column_name', None)
         self.maximum_number_of_rows = int(self.config.get(
@@ -125,31 +124,11 @@ class AwsBillingDetailThreadConfiguration(object):
 
         return rtn
 
-    def set_last_run_time(self, run_time):
-        """
-        Sets the last run time to the run_time argument.
-
-        Arguments:
-        run_time - the time when billing last executed successfully (end)
-        """
-
-        if utils.CANCEL_WORKERS_EVENT.is_set():
-            return
-
-        utcnow = (datetime.datetime.utcnow()
-                  .replace(microsecond=0, tzinfo=dateutil.tz.tzutc()))
-        if not run_time:
-            run_time = utcnow
-        self.last_run_time = run_time
-        self.config.output.set(
-            self.section_name, 'last_run_time', run_time.isoformat())
-        self.config.output.save()
-
     def get_last_record_id(self, curr_month):
         """
         Gets the last record id for the given month
         """
-        return self.config.get(
+        return self.config.output.get(
             self.section_name, 'last_record_id_' + curr_month, None)
 
     def set_last_record_id(self, curr_month, record_id):
@@ -214,13 +193,14 @@ class AwsBillingMetricsCommand(AwsBaseMetricsCommand):
 
             try:
                 if config.enabled:
-                    if config.last_run_time:
-                        diff = utcnow - config.last_run_time
+                    last_run_time = config.config.get_last_run_time()
+                    if last_run_time:
+                        diff = utcnow - last_run_time
                         if diff.total_seconds() <= config.delay:
                             self.logger.info('Not ready to run %s (last run at '
                                              '%s; expected delay interval is %ds)',
                                              config.section_name,
-                                             str(config.last_run_time),
+                                             str(last_run_time),
                                              config.delay)
                             continue
                     if config.bucket == 'local':
@@ -229,7 +209,7 @@ class AwsBillingMetricsCommand(AwsBaseMetricsCommand):
 
                     else:
                         self._get_csv_from_s3(config)
-                    config.set_last_run_time(utcnow)
+                    config.config.set_last_run_time(utcnow, None, True)
                 else:
                     self.logger.info('Billing thread %s is disabled',
                                      config.section_name)

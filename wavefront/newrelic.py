@@ -17,8 +17,8 @@ import time
 import logging.config
 import dateutil.parser
 
-from wavefront.utils import Configuration, parallel_process_and_wait
-from wavefront import utils
+from wavefront.utils import parallel_process_and_wait
+from wavefront import command, utils
 from wavefront.newrelic_common import NewRelicCommand
 
 # default number of metric names to include with each GetMetricData
@@ -29,7 +29,7 @@ DEFAULT_MAX_METRIC_NAME_COUNT = 25
 DEFAULT_CONFIG_FILE_PATH = '/opt/wavefront/etc/wavefront-collector-newrelic.conf'
 
 #pylint: disable=too-many-instance-attributes
-class NewRelicPluginConfiguration(Configuration):
+class NewRelicPluginConfiguration(command.CommandConfiguration):
     """
     Stores the configuration for this plugin
     """
@@ -58,14 +58,15 @@ class NewRelicPluginConfiguration(Configuration):
             self.fields_blacklist_regex_compiled.append(re.compile(regex))
         self.additional_fields = self.getlist('filter', 'additional_fields', [])
         self.application_ids = self.getlist('filter', 'application_ids', [])
-        self.start_time = self.get('filter', 'start_time', None)
-        self.last_run_time = self.get('options', 'last_run_time', None)
-        self.end_time = self.get('filter', 'end_time', None)
-        if self.start_time and self.end_time and self.last_run_time:
-            if self.last_run_time > self.start_time:
-                self.start_time = self.last_run_time
-        elif self.last_run_time:
-            self.start_time = self.last_run_time
+        self.start_time = self.getdate('filter', 'start_time', None)
+        self.end_time = self.getdate('filter', 'end_time', None)
+        self._setup_output(self)
+        last_run_time = self.get_last_run_time()
+        if self.start_time and self.end_time and last_run_time:
+            if last_run_time > self.start_time:
+                self.start_time = last_run_time
+        elif last_run_time:
+            self.start_time = last_run_time
 
         self.include_application_summary = self.getboolean(
             'options', 'include_application_summary', True)
@@ -75,11 +76,6 @@ class NewRelicPluginConfiguration(Configuration):
             'options', 'include_server_summary', True)
         self.include_servers = self.getboolean(
             'options', 'include_server_details', False)
-        self.output_directory = self.config.get(
-            'options', 'output_directory', '.')
-        self.output = Configuration(
-            config_file_path=self.output_directory,
-            create_if_not_exist=True)
 
         self.include_hosts = self.getboolean('options', 'include_hosts', True)
         self.min_delay = int(self.get('options', 'min_delay', 60))
@@ -116,23 +112,6 @@ class NewRelicPluginConfiguration(Configuration):
 
         self.metric_last_sent = {}
         self.send_zero_every = int(self.get('options', 'send_zero_every', 0))
-
-    def set_last_run_time(self, run_time):
-        """
-        Sets the last run time to the run_time argument.
-
-        Arguments:
-        run_time - the time when this script last executed successfully (end)
-        """
-
-        if utils.CANCEL_WORKERS_EVENT.is_set():
-            return
-
-        if not run_time:
-            run_time = (datetime.datetime.utcnow()
-                        .replace(microsecond=0, tzinfo=dateutil.tz.tzutc()))
-        self.output.set('options', 'last_run_time', run_time.isoformat())
-        self.output.save()
 
     def get_value_to_send(self, name, value):
         """
@@ -424,15 +403,13 @@ class NewRelicMetricRetrieverCommand(NewRelicCommand):
             self.init_proxy()
             # construct start time for when to get metrics starting from
             if self.config.start_time:
-                start = (dateutil.parser.parse(self.config.start_time)
-                         .replace(microsecond=0, tzinfo=dateutil.tz.tzutc()))
+                start = self.config.start_time
             else:
                 start = ((datetime.datetime.utcnow() -
                           datetime.timedelta(seconds=60.0))
                          .replace(microsecond=0, tzinfo=dateutil.tz.tzutc()))
             if self.config.end_time:
-                end = (dateutil.parser.parse(self.config.end_time)
-                       .replace(microsecond=0, tzinfo=dateutil.tz.tzutc()))
+                end = self.config.end_time
             else:
                 end = None
 
