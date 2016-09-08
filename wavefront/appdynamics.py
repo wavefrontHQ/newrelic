@@ -14,7 +14,10 @@ import sys
 import time
 
 import logging.config
+
+import appd
 import dateutil.parser
+from collections import Counter
 
 from appd.request import AppDynamicsClient
 from wavefront import command
@@ -54,6 +57,16 @@ class AppDPluginConfiguration(command.CommandConfiguration):
 
         self.recurse_metric_tree = self.getboolean(
             'options', 'recurse_metric_tree', False)
+
+        self.retrieve_BT_node_data = self.getboolean(
+            'options', 'retrieve_BT_node_data', False)
+        self.retrieve_error_node_data = self.getboolean(
+            'options', 'retrieve_error_node_data', False)
+        self.retrieve_Application_Infrastructure_Performance_node_data = self.getboolean(
+            'options', 'retrieve_Application_Infrastructure_Performance_node_data', False)
+        self.retrieve_EUM_AJAX_data = self.getboolean(
+            'options', 'retrieve_EUM_AJAX_data', False)
+
         self.application_ids = self.getlist('filter', 'application_ids', [])
         self.start_time = self.getdate('filter', 'start_time', None)
         self.end_time = self.getdate('filter', 'end_time', None)
@@ -116,6 +129,7 @@ class AppDMetricRetrieverCommand(command.Command):
     """
     Command object for retrieving AppD metrics via the REST API.
     """
+    global_points_counter = 0
 
     def __init__(self, **kwargs):
         super(AppDMetricRetrieverCommand, self).__init__(**kwargs)
@@ -199,15 +213,23 @@ class AppDMetricRetrieverCommand(command.Command):
         # connect to the wf proxy
         self.proxy = WavefrontMetricsWriter(self.config.writer_host,
                                             self.config.writer_port,
-                                            self.config.is_dry_run)
-        self.proxy.start()
+                                           self.config.is_dry_run)
+        try:
+            self.proxy.start()
+        except:
+            print("Error connecting to Wavefront proxy :", sys.exc_info()[0])
+            raise
 
         # connect to appd
-        self.appd_client = AppDynamicsClient(self.config.api_url,
-                                             self.config.api_username,
-                                             self.config.api_password,
-                                             self.config.api_account,
-                                             self.config.api_debug)
+        try:
+            self.appd_client = AppDynamicsClient(self.config.api_url,
+                                                 self.config.api_username,
+                                                 self.config.api_password,
+                                                 self.config.api_account,
+                                                 self.config.api_debug)
+        except:
+            print("Error connecting to AppDynamics :", sys.exc_info()[0])
+            raise
 
         # construct start time for when to get metrics starting from
         if self.config.start_time:
@@ -234,6 +256,7 @@ class AppDMetricRetrieverCommand(command.Command):
         start = start.replace(microsecond=0, tzinfo=dateutil.tz.tzutc())
         self.logger.info('Running %s - %s', str(start), str(end))
 
+        print 'Fetching Applications from the Appdynamics Controller... '
         for app in self.appd_client.get_applications():
             if str(app.id) not in self.config.application_ids:
                 print 'skipping %s (%s)' % (app.name, str(app.id))
@@ -333,24 +356,71 @@ class AppDMetricRetrieverCommand(command.Command):
         start - the start datetime object
         end - the end datetime object
         """
+        metric_counter = 0
 
         for path in paths:
+            #print 'Number of paths %s ' % Counter(paths)
+            print 'Processing metrics under path %s ' % (path)
+
             if utils.CANCEL_WORKERS_EVENT.is_set():
                 break
             self.logger.info('[%s] Getting \'%s\' metrics for %s - %s',
                              app.name, path, start, end)
-            metrics = self.appd_client.get_metrics(
-                path, app.id, 'BETWEEN_TIMES', None,
-                long(utils.unix_time_seconds(start) * 1000),
-                long(utils.unix_time_seconds(end) * 1000),
-                False)
+            #make sure the * wildcards are the correct numbers and match up below
+            if  'Business'in path and 'Business Transaction Performance|Business Transactions|*|*|*' not in path:
+                path = 'Business Transaction Performance|Business Transactions|*|*|*' #the last 3 components of the metric path. This should be 'tier_name|bt_name|metric_name'.
+                if self.config.retrieve_BT_node_data:
+                    if 'Business Transaction Performance|Business Transactions|*|*|*|*|*' not in paths :
+                        print 'adding tier_name|bt_name|indvidual_nodes|node_name|metric_name to business transaction'
+                        paths.append('Business Transaction Performance|Business Transactions|*|*|*|*|*') #This should be 'tier_name|bt_name|indvidual_nodes|node_name|metric_name'
+
+            if "Backends" in path:
+                path = 'Backends|*|*' # the last two components of the metric path. This should be 'backend_name|metric_name'
+
+            if 'End User Experience|*' in path:
+                path = 'End User Experience|*|*'
+                if self.config.retrieve_EUM_AJAX_data:
+                    if 'End User Experience|AJAX Requests|*|*' not in paths:
+                        paths.append('End User Experience|AJAX Requests|*|*')
+
+            if "Errors" in path:
+                path = 'Errors|*|*|*' # tier level error stats
+                if self.config.retrieve_error_node_data:
+                    if 'Errors|*|*|*|*|*' not in paths:
+                        paths.append('Errors|*|*|*|*|*') # individual node level error stats
+
+            if 'Application Infrastructure Performance' in path:
+                if self.config.retrieve_Application_Infrastructure_Performance_node_data:
+                    if 'Application Infrastructure Performance|*|*|*|JVM|*|*' not in paths:
+                            paths.append('Application Infrastructure Performance|*|*|*|JVM|*|*') #Application Infrastructure Performance|abtest-consumer|Individual Nodes|16f60b849273|JVM|Garbage Collection|GC Time Spent Per Min (ms)
+            try:
+                metrics = self.appd_client.get_metrics(
+                    path, app.id, 'BETWEEN_TIMES', None,
+                    long(utils.unix_time_seconds(start) * 1000),
+                    long(utils.unix_time_seconds(end) * 1000),
+                    False)
+
+            except:
+                    print("Unexpected error:", sys.exc_info()[0])
+                    continue
+
             for metric in metrics:
                 if utils.CANCEL_WORKERS_EVENT.is_set():
                     break
+                #if not (metric.values ):
+                    # print 'No value for metric - %s ' % metric.path
+
                 for value in metric.values:
-                    self.send_metric(self.config.namespace + '|' + path,
+                    if "|/" in metric.path:
+                        metric.path = str(metric.path).replace("|/",".")
+                    metric_counter +=1
+                    self.send_metric(app.name + '|' + metric.path,
                                      value.current,
-                                     'appd', # the source name
+                                     'appd',  # the source name
                                      long(value.start_time_ms / 1000),
-                                     None, # tags
+                                     None,  # tags
                                      self.config.get_value_to_send)
+        self.global_points_counter +=metric_counter
+
+        self.logger.info('Number of AppDynamics points processed in this run [%s]', metric_counter)
+        self.logger.info('Total points processed since begining %s ', self.global_points_counter)
