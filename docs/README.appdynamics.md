@@ -17,7 +17,7 @@ The `appdynamics` command supports pulling metrics from AppDynamics.  It uses th
 ## Command Line Options
 | Option | Description | Default |
 | ------ | ----------- | ------- |
-| --config `FILE` | Full path to the configuration file | /opt/wavefront/etc/newrelic.conf |
+| --config `FILE` | Full path to the configuration file | /opt/wavefront/etc/appDynamics.conf |
 
 ## Configuration
 The configuration is retrieved from and stored in an INI-formatted file with multiple groups.  Each group is described in more detail in the following sections. 
