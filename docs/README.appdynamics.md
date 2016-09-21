@@ -2,10 +2,11 @@
 The `appdynamics` command supports pulling metrics from AppDynamics.  It uses the [AppDynamicsREST](https://github.com/tradel/AppDynamicsREST/) client to interact with AppDynamics.
 
 ## Usage
-1. Install the [Wavefront Collector](https://pypi.python.org/pypi?name=wavefront_collector)
-2. Copy `appdynamics.conf` from `appdynamics-sample-configuration` to a directory of your choosing
-3. Open `appdynamics.conf` in an editor and update the `api`, `filter`, and `writer` sections.  (See below for details)
-4. Run the Wavefront Collector:
+1. Install the [Wavefront Collector] pip install wavefront_collector (https://pypi.python.org/pypi/wavefront_collector)
+2. Install [AppDynamicsREST] pip install AppDynamicsREST (https://github.com/tradel/AppDynamicsREST)
+3. Copy `appdynamics.conf` from `appdynamics-sample-configuration` to a directory of your choosing
+4. Open `appdynamics.conf` in an editor and update the `api`, `filter`, and `writer` sections.  (See below for details)
+5. Run the Wavefront Collector:
 ```wf -c wavefront-collector.conf```
 
 ## AppDynamics REST API and SDK
