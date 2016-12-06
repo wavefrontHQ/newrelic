@@ -78,7 +78,7 @@ class NewRelicPluginConfiguration(command.CommandConfiguration):
             'options', 'include_server_details', False)
 
         self.include_hosts = self.getboolean('options', 'include_hosts', True)
-        self.min_delay = int(self.get('options', 'min_delay', 60))
+        self.min_delay = int(self.get('options', 'min_delay', 1800))
         self.wf_api_key = self.get('wavefront_api', 'key', '')
         self.wf_api_endpoint = self.get(
             'wavefront_api', 'endpoint', 'https://metrics.wavefront.com/')
@@ -419,7 +419,7 @@ class NewRelicMetricRetrieverCommand(NewRelicCommand):
                            .replace(microsecond=0, tzinfo=dateutil.tz.tzutc()))
 
                 if (end - start).total_seconds() < self.config.min_delay:
-                    self.logger.info('Not running since %s - %s < 60',
+                    self.logger.info('Not running since %s - %s < 1800',
                                      str(end), str(start))
                     return
 
