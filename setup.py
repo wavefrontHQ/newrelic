@@ -25,7 +25,7 @@ setuptools.setup(
     name='wavefront_collector',
     version='0.0.48',
     author='Wavefront',
-    author_email='mike@wavefront.com',
+    author_email='support@wavefront.com',
     description=('Wavefront Collector Tools'),
     license='BSD',
     long_description=LONG_DESCRIPTION,
