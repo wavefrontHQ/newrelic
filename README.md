@@ -20,7 +20,7 @@ A couple of Linux development packages are required to run the collector:
 Install using pip or using the provided setup.py.
 
 ```
-> pip install wavefront_collector
+> pip install wavefront-collector
 ```
 
 ## Executing an Integration
